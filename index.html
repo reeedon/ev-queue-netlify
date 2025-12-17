@@ -1,0 +1,107 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EV Charging Queue</title>
+  <style>
+    :root { --bg:#f6f7fb; --border:#d0d7de; --text:#1f2328; --muted:#57606a; --accent:#2563eb;
+            --success-bg:#dff6dd; --success-border:#73be6f; --danger-bg:#fde7e9; --danger-border:#e83d3d; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text)}
+    header{display:flex;gap:1rem;align-items:baseline;padding:1rem 1.25rem;background:#fff;border-bottom:1px solid var(--border)}
+    h1{margin:0;font-size:1.25rem}
+    .meta{color:var(--muted)}
+    .actions{margin-left:auto;display:flex;gap:.5rem}
+    button,select,input{font:inherit;padding:.5rem .6rem;border:1px solid var(--border);border-radius:.5rem;background:#fff}
+    button{background:var(--accent);color:#fff;border-color:var(--accent);cursor:pointer}
+    button.secondary{background:#fff;color:var(--text);border-color:var(--border)}
+    main{display:grid;grid-template-columns:1.1fr 1fr 1.2fr;gap:1rem;padding:1rem}
+    .panel{background:#fff;border:1px solid var(--border);border-radius:.75rem;padding:1rem}
+    .panel h2{margin:0 0 .75rem 0;font-size:1.05rem}
+    #userForm{display:grid;grid-template-columns:1fr 160px auto;gap:.5rem}
+    .list{margin-top:.75rem;display:flex;flex-direction:column;gap:.5rem;min-height:160px;padding:.5rem;border:1px dashed var(--border);border-radius:.5rem}
+    .item{display:flex;justify-content:space-between;align-items:center;gap:.75rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:.5rem;background:#fafafa}
+    .name{font-weight:600}
+    .pref{color:var(--muted);font-size:.9rem}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+    .spot{border:2px solid var(--success-border);border-radius:.75rem;padding:.75rem;min-height:110px;display:grid;grid-template-rows:auto 1fr auto;gap:.35rem}
+    .spot.free{background:var(--success-bg);border-color:var(--success-border)}
+    .spot.occupied{background:var(--danger-bg);border-color:var(--danger-border)}
+    .title{font-weight:700}
+    .badge{border:1px solid var(--border);padding:.1rem .4rem;border-radius:.4rem;font-size:.85rem}
+    .hint{color:var(--muted);font-size:.9rem}
+  </style>
+</head>
+<body>
+<header>
+  <h1>EV Charging Queue</h1>
+  <div class="meta">Shared state via GitHub · Daily reset at <strong>6:00 AM</strong> (ET)</div>
+  <div class="actions">
+    <button class="secondary" id="reload">Reload</button>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <h2>Users</h2>
+    <form id="userForm">
+      <input id="userName" placeholder="Full name" />
+      <select id="userPref"><option>Both</option><option>Tesla</option><option>ChargePoint</option></select>
+      <button type="submit">Add</button>
+    </form>
+    <div class="hint" style="margin-top:.5rem">Users persist. To remove a user, edit <code>state.json</code> in GitHub.</div>
+    <div id="usersList" class="list"></div>
+  </section>
+  <section class="panel">
+    <h2>Chargers</h2>
+    <div id="spotsGrid" class="grid"></div>
+  </section>
+  <section class="panel">
+    <h2>Queue</h2>
+    <div id="queueList" class="list"></div>
+    <div style="margin-top:.5rem"><button class="secondary" id="clearQueue">Clear Queue (now)</button></div>
+    <div class="hint" style="margin-top:.5rem">Queue and spots reset automatically at 6:00 AM (ET).</div>
+  </section>
+</main>
+<script>
+const API = (window.NETLIFY_BASE || '') + '/.netlify/functions/state';
+
+async function apiGet(){ const r = await fetch(API); if(!r.ok) throw new Error('GET failed'); return r.json(); }
+async function apiPost(action,payload){ const r = await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,payload})}); if(!r.ok) throw new Error('POST failed'); return r.json(); }
+
+function eligible(pref,type){ return pref==='Both' || pref===type; }
+
+async function reload(){
+  const state = await apiGet();
+  // Users
+  const uList = document.getElementById('usersList'); uList.innerHTML='';
+  (state.users||[]).forEach(u=>{ const div=document.createElement('div'); div.className='item'; div.innerHTML=`<div><span class='name'>${u.name}</span> <span class='pref'>(${u.pref})</span></div><button class='secondary'>Add to queue</button>`; div.querySelector('button').onclick=async()=>{ await apiPost('addToQueue',{userId:u.id}); await reload(); await apiPost('fillSpots',{}).catch(()=>{}); await reload(); }; uList.appendChild(div); });
+  // Spots
+  const sGrid = document.getElementById('spotsGrid'); sGrid.innerHTML='';
+  (state.spots||[]).forEach(s=>{ const occ = s.userId && (state.users||[]).find(x=>x.id===s.userId);
+    const div=document.createElement('div'); div.className='spot '+(occ?'occupied':'free');
+    div.innerHTML=`<div class='title'>${s.type==='Tesla'?'🚘':'⚡'} ${s.label}</div><div>${occ?`<span class='name'>${occ.name}</span> <span class='badge'>${occ.pref}</span>`:'<em>Free</em>'}</div><div>${occ?"<button class='secondary'>End Session</button>":''}</div>`;
+    if(occ){ div.querySelector('button').onclick=async()=>{ await apiPost('endSession',{spotId:s.id}); await reload(); }; }
+    sGrid.appendChild(div);
+  });
+  // Queue
+  const qList = document.getElementById('queueList'); qList.innerHTML='';
+  (state.queue||[]).sort((a,b)=>a.position-b.position).forEach((q,i)=>{
+    const u=(state.users||[]).find(x=>x.id===q.userId);
+    const div=document.createElement('div'); div.className='item';
+    div.innerHTML=`<div><span class='badge'>#${i+1}</span> <span class='name'>${u?u.name:'(removed)'}</span> <span class='pref'>${u?u.pref:''}</span></div><div><button class='secondary' data-a='up'>↑</button> <button class='secondary' data-a='down'>↓</button> <button class='secondary' data-a='rm'>Remove</button></div>`;
+    div.querySelector('[data-a=up]').onclick=async()=>{ await apiPost('moveQueue',{userId:q.userId,delta:-1}); await reload(); };
+    div.querySelector('[data-a=down]').onclick=async()=>{ await apiPost('moveQueue',{userId:q.userId,delta:+1}); await reload(); };
+    div.querySelector('[data-a=rm]').onclick=async()=>{ await apiPost('removeFromQueue',{userId:q.userId}); await reload(); };
+    qList.appendChild(div);
+  });
+}
+
+document.getElementById('reload').onclick=reload;
+document.getElementById('clearQueue').onclick=async()=>{ await apiPost('clearQueue',{}); await reload(); };
+document.getElementById('userForm').onsubmit=async(e)=>{ e.preventDefault(); const name=document.getElementById('userName').value.trim(); const pref=document.getElementById('userPref').value; if(!name) return alert('Enter a name'); await apiPost('addUser',{name,pref}); document.getElementById('userName').value=''; document.getElementById('userPref').value='Both'; await reload(); };
+
+reloadreload();
+</script>
+</body>
