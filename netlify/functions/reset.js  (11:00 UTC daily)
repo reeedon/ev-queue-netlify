@@ -1,13 +1,13 @@
 
 // netlify/functions/reset.js
-// CommonJS handler. The schedule is configured in netlify.toml (step 2).
+// CommonJS handler; schedule is configured in netlify.toml.
 
 exports.handler = async function (event, context) {
   try {
     const BASE = process.env.PUBLIC_BASE_URL;      // e.g., https://unrivaled-druid-efd596.netlify.app
     const KEY  = process.env.INTERNAL_KEY || "";   // optional shared secret
     if (!BASE) {
-      return new Response('Missing PUBLIC_BASE_URL', { status: 500 });
+      return { statusCode: 500, body: "Missing PUBLIC_BASE_URL" };
     }
 
     // Read current state
@@ -15,7 +15,7 @@ exports.handler = async function (event, context) {
       headers: KEY ? { 'x-key': KEY } : {}
     });
     if (!readRes.ok) {
-      return new Response(`Read failed: ${readRes.status}`, { status: 500 });
+      return { statusCode: 500, body: `Read failed: ${readRes.status}` };
     }
     const state = await readRes.json();
 
@@ -36,11 +36,14 @@ exports.handler = async function (event, context) {
       body: JSON.stringify({ action: 'writeAll', payload: state })
     });
     if (!writeRes.ok) {
-      return new Response(`Write failed: ${writeRes.status}`, { status: 500 });
+      return { statusCode: 500, body: `Write failed: ${writeRes.status}` };
     }
 
-    return new Response('Daily reset complete', { status: 200 });
-   } catch (err) {
-    return new Response(`Error: ${err.message}`, { status: 500 });
+    return {
+      statusCode: 200,
+      body: "Daily reset complete"
+    };
+  } catch (err) {
+       return { statusCode: 500, body: `Error: ${err.message}` };
   }
 
