@@ -1,7 +1,6 @@
-
 [functions]
 directory = "netlify/functions"
 
-# Run reset daily at 11:00 UTC (≈ 6:00 AM EST). Netlify’s cron is UTC.
+# Schedule reset to run at 11:00 UTC (≈ 6:00 AM EST).
 [functions."reset"]
 schedule = "0 11 * * *"
